@@ -148,8 +148,8 @@ export function generateLedges(seed, yFrom, yTo) {
     row += 1;
     const tutorial = row <= FIRST_ROWS;
     const band = bandAtY(prevY + GAP_HINT(tutorial));
-    const gapMin = tutorial ? 58 : band.gapMin;
-    const gapMax = tutorial ? 66 : band.gapMax;
+    const gapMin = tutorial ? 48 : band.gapMin;
+    const gapMax = tutorial ? 72 : band.gapMax;
     const y = prevY + randRange(rng, gapMin, gapMax);
     const w = tutorial ? FIRST_WIDTH : bandAtY(y).width;
     const crumbleIn = tutorial ? FIRST_CRUMBLE : bandAtY(y).crumbleIn;
@@ -167,5 +167,5 @@ export function generateLedges(seed, yFrom, yTo) {
 }
 
 function GAP_HINT(tutorial) {
-  return tutorial ? 62 : 66;
+  return tutorial ? 58 : 80;
 }

@@ -3,6 +3,7 @@
 import {
   BUFFER_TIME,
   COYOTE_TIME,
+  CHARGE_TIME,
   FIXED_DT,
   MAX_DT,
   FAIL_BELOW,
@@ -17,7 +18,7 @@ import {
   GRAVITY,
 } from "./constants.mjs";
 import { hash32 } from "./rng.mjs";
-import { integrate, applyJump, findLanding, landingOverlapX } from "./physics.mjs";
+import { integrate, applyJump, findLanding, landingOverlapX, chargePower } from "./physics.mjs";
 import { generateLedges } from "./generate.mjs";
 
 function cloneState(s) {
@@ -93,14 +94,54 @@ function updateCamera(state) {
   if (desired > state.cameraY) state.cameraY = desired;
 }
 
+function holdDirFrom(input, charging) {
+  const holdLeft = !!(input?.holdLeft || input?.jumpLeft);
+  const holdRight = !!(input?.holdRight || input?.jumpRight);
+  if (charging < 0 && holdLeft) return -1;
+  if (charging > 0 && holdRight) return 1;
+  if (holdLeft && !holdRight) return -1;
+  if (holdRight && !holdLeft) return 1;
+  if (holdLeft && holdRight) return charging || 0;
+  return 0;
+}
+
+/** Level holds + release-to-jump. Applied once per tick before substeps. */
+function applyChargeInput(state, input) {
+  const p = state.player;
+  const hold = holdDirFrom(input, p.charging);
+  if (p.charging && hold !== p.charging) {
+    if (hold === 0) {
+      p.buffer = BUFFER_TIME;
+      p.pendingPower = chargePower(p.charge);
+      p.facing = p.charging < 0 ? -1 : 1;
+    } else {
+      p.charge = 0;
+      p.buffer = 0;
+      p.pendingPower = 0;
+    }
+  }
+  p.charging = hold;
+  if (hold) p.facing = hold;
+  if (!hold && p.buffer <= 0) {
+    p.charge = 0;
+    p.pendingPower = 0;
+  }
+}
+
 function step(state, dt) {
   const p = state.player;
   if (p.buffer > 0) p.buffer = Math.max(0, p.buffer - dt);
   if (p.coyote > 0) p.coyote = Math.max(0, p.coyote - dt);
 
-  if (p.buffer > 0 && (p.grounded || p.coyote > 0)) {
+  const canJump = p.grounded || p.coyote > 0;
+  if (p.charging && canJump) {
+    p.charge = Math.min(1, (p.charge || 0) + dt / CHARGE_TIME);
+  }
+
+  if (p.buffer > 0 && canJump) {
     const fromStart = p.grounded && supportLedge(p, state.ledges)?.id === "start";
-    applyJump(p, p.facing < 0 ? -1 : 1);
+    const power = p.pendingPower ?? chargePower(p.charge);
+    applyJump(p, p.facing < 0 ? -1 : 1, power);
     if (state.hintJumpsLeft > 0) state.hintJumpsLeft -= 1;
     if (fromStart) {
       const start = state.ledges.find((l) => l.id === "start");
@@ -118,7 +159,7 @@ function step(state, dt) {
       p.vx = 0;
       p.vy = 0;
       p.y = under.y;
-      p.pose = "stand";
+      p.pose = p.charging ? "crouch" : "stand";
     }
   }
 
@@ -157,15 +198,7 @@ function step(state, dt) {
 export function tick(state, input, dt) {
   if (state.status !== "playing") return cloneState(state);
   const s = cloneState(state);
-  const p = s.player;
-  if (input?.jumpLeft) {
-    p.buffer = BUFFER_TIME;
-    p.facing = -1;
-  }
-  if (input?.jumpRight) {
-    p.buffer = BUFFER_TIME;
-    p.facing = 1;
-  }
+  applyChargeInput(s, input);
   let left = Math.min(Math.max(Number(dt) || 0, 0), MAX_DT);
   while (left > 0 && s.status === "playing") {
     const stepDt = Math.min(FIXED_DT, left);
@@ -194,6 +227,9 @@ export function createInitialState({ seed, dateJst, bestM = 0, todayBestM = 0 } 
       pose: "stand",
       coyote: 0,
       buffer: 0,
+      charge: 0,
+      charging: 0,
+      pendingPower: 0,
     },
     ledges,
     shards: [],

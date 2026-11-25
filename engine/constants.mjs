@@ -10,15 +10,27 @@ export const START_X = 180;
 
 /** Downward magnitude (wu/s²). Apply as vy -= GRAVITY * dt. */
 export const GRAVITY = 1800;
-/** Horizontal jump speed; sign comes from facing. */
-export const JUMP_VX = 185;
-/** Upward jump speed. Apex is JUMP_VY² / (2 * GRAVITY) ≈ 93.4 wu. */
-export const JUMP_VY = 580;
+/** Charge 0→1 over this many seconds, then clamp. Jump on release. */
+export const CHARGE_TIME = 0.6;
+/** Short tap still uses at least this power (0–1). */
+export const CHARGE_MIN = 0.45;
+/** Sampled powers for reachability / generation fairness. */
+export const CHARGE_SAMPLES = [0.45, 0.52, 0.6, 0.68, 0.76, 0.84, 0.92, 1];
+
+/** Horizontal jump speed at power 0 and 1; sign comes from facing. */
+export const JUMP_VX_MIN = 110;
+export const JUMP_VX_MAX = 230;
+/** Upward jump speed at power 0 and 1. Apex at 1 is ≈ 136 wu. */
+export const JUMP_VY_MIN = 360;
+export const JUMP_VY_MAX = 700;
+/** Mid-power aliases (power 0.625): kept for any leftover mid-arc math. */
+export const JUMP_VX = JUMP_VX_MIN + (JUMP_VX_MAX - JUMP_VX_MIN) * 0.625;
+export const JUMP_VY = JUMP_VY_MIN + (JUMP_VY_MAX - JUMP_VY_MIN) * 0.625;
 
 export const LEDGE_H = 14;
 export const COLS = [70, 180, 290];
-export const GAP_MIN = 58;
-export const GAP_MAX = 74;
+export const GAP_MIN = 44;
+export const GAP_MAX = 118;
 
 export const BUFFER_TIME = 0.1;
 export const COYOTE_TIME = 0.1;
@@ -72,11 +84,11 @@ export const PALETTE = {
 
 /** Height bands: crumble / warn / width / gap, and how often only one side is offered. */
 export const BANDS = [
-  { upToM: 15, crumbleIn: 1.8, warn: 0.5, width: 88, gapMin: 58, gapMax: 70, oneSideChance: 0 },
-  { upToM: 40, crumbleIn: 1.4, warn: 0.45, width: 80, gapMin: 58, gapMax: 72, oneSideChance: 0 },
-  { upToM: 80, crumbleIn: 1.1, warn: 0.4, width: 72, gapMin: 60, gapMax: 74, oneSideChance: 0.15 },
-  { upToM: 130, crumbleIn: 0.85, warn: 0.35, width: 68, gapMin: 62, gapMax: 74, oneSideChance: 0.3 },
-  { upToM: Infinity, crumbleIn: 0.65, warn: 0.3, width: 64, gapMin: 68, gapMax: 74, oneSideChance: 0.55 },
+  { upToM: 15, crumbleIn: 1.8, warn: 0.5, width: 88, gapMin: 44, gapMax: 88, oneSideChance: 0 },
+  { upToM: 40, crumbleIn: 1.4, warn: 0.45, width: 80, gapMin: 48, gapMax: 96, oneSideChance: 0 },
+  { upToM: 80, crumbleIn: 1.1, warn: 0.4, width: 72, gapMin: 50, gapMax: 104, oneSideChance: 0.15 },
+  { upToM: 130, crumbleIn: 0.85, warn: 0.35, width: 68, gapMin: 54, gapMax: 112, oneSideChance: 0.3 },
+  { upToM: Infinity, crumbleIn: 0.65, warn: 0.3, width: 64, gapMin: 58, gapMax: 118, oneSideChance: 0.55 },
 ];
 
 export function bandAtY(y) {

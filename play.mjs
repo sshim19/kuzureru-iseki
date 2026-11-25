@@ -22,16 +22,9 @@ import {
   saveBests,
   shareText,
   sharePageUrl,
-  shareCopyText,
   tweetShareUrl,
   lineShareUrl,
-  canUseNativeShare,
-  canShareFiles,
-  isShareAbort,
-  copyText,
-  GAME_TITLE,
 } from "./render/share.mjs";
-import { resultCardFile, downloadBlob } from "./render/resultCard.mjs";
 
 const screens = bindScreens(document);
 const canvas = document.querySelector("#game");
@@ -246,9 +239,6 @@ function currentShare() {
   return {
     text: lastShare,
     url: sharePageUrl(),
-    title: GAME_TITLE,
-    dateLabel,
-    heightM: state.heightM,
   };
 }
 
@@ -265,87 +255,6 @@ function openShareTab(href) {
   window.open(href, "_blank", "noopener,noreferrer");
 }
 
-async function makeCardFile() {
-  const rec = currentShare();
-  return resultCardFile({ dateLabel: rec.dateLabel, heightM: rec.heightM, url: rec.url });
-}
-
-async function shareResult() {
-  const rec = currentShare();
-  screens.setShareStatus(null);
-  let file = null;
-  try {
-    file = await makeCardFile();
-  } catch {
-    /* 文章だけの共有へ */
-  }
-  if (canUseNativeShare()) {
-    if (file && canShareFiles([file])) {
-      try {
-        const payload = { title: rec.title, text: rec.text, files: [file] };
-        if (rec.url) payload.url = rec.url;
-        await navigator.share(payload);
-        return;
-      } catch (err) {
-        if (isShareAbort(err)) return;
-      }
-    }
-    try {
-      const payload = { title: rec.title, text: rec.text };
-      if (rec.url) payload.url = rec.url;
-      await navigator.share(payload);
-      return;
-    } catch (err) {
-      if (isShareAbort(err)) return;
-    }
-  }
-  const ok = await copyText(shareCopyText(rec));
-  screens.setCopyStatus(ok);
-}
-
-async function shareToInstagram() {
-  screens.setShareStatus(null);
-  let file = null;
-  try {
-    file = await makeCardFile();
-  } catch {
-    screens.setShareStatus("画像を保存できませんでした");
-    return;
-  }
-  if (canShareFiles([file])) {
-    try {
-      const rec = currentShare();
-      const payload = { title: rec.title, text: rec.text, files: [file] };
-      if (rec.url) payload.url = rec.url;
-      await navigator.share(payload);
-      return;
-    } catch (err) {
-      if (isShareAbort(err)) return;
-    }
-  }
-  try {
-    downloadBlob(file, file.name);
-    screens.setShareStatus("画像を保存しました。インスタで投稿してください");
-  } catch {
-    screens.setShareStatus("画像を保存できませんでした");
-  }
-}
-
-screens.el.btnShare?.addEventListener(
-  "click",
-  guardClick(() => {
-    void shareResult();
-  }),
-);
-
-screens.el.btnCopy?.addEventListener(
-  "click",
-  guardClick(async () => {
-    const ok = await copyText(shareCopyText(currentShare()));
-    screens.setCopyStatus(ok);
-  }),
-);
-
 screens.el.btnShareX?.addEventListener(
   "click",
   guardClick(() => {
@@ -359,15 +268,6 @@ screens.el.btnShareLine?.addEventListener(
     openShareTab(lineShareUrl(currentShare()));
   }),
 );
-
-screens.el.btnShareIg?.addEventListener(
-  "click",
-  guardClick(() => {
-    void shareToInstagram();
-  }),
-);
-
-screens.applyShareAvailability(canUseNativeShare());
 
 function pointerDown(e) {
   if (state.status !== "playing") return;

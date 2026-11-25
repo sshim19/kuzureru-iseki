@@ -1,4 +1,9 @@
-/** タイトル / HUD / 終了の DOM と文言。文面は DESIGN.md のまま。 */
+/** タイトル / HUD / 終了の DOM と文言。 */
+
+export const RULE_HOLD =
+  "左か右を押してためて、はなすとその向きに跳べます。長く押すほど、高く遠くまで跳べます。";
+export const RULE_SWIPE =
+  "跳びたい向きに指をはらうと跳べます。長くはらうほど、高く遠くまで跳べます。";
 
 /**
  * @param {ParentNode} [root]
@@ -27,6 +32,9 @@ export function bindScreens(root = document) {
     btnCopy: root.querySelector("#btn-copy"),
     btnQuit: root.querySelector("#btn-quit"),
     copyStatus: root.querySelector("#copy-status"),
+    canvas: root.querySelector("#game"),
+    rules: root.querySelectorAll(".rule"),
+    modeBtns: root.querySelectorAll("[data-mode]"),
   };
 
   function hide(node, on) {
@@ -40,6 +48,37 @@ export function bindScreens(root = document) {
       node.focus({ preventScroll: true });
     } catch {
       /* ignore */
+    }
+  }
+
+  /**
+   * @param {"hold" | "swipe"} mode
+   */
+  function applyControlMode(mode) {
+    const swipe = mode === "swipe";
+    for (const btn of el.modeBtns) {
+      btn.setAttribute("aria-pressed", String(btn.dataset.mode === (swipe ? "swipe" : "hold")));
+    }
+    const rule = swipe ? RULE_SWIPE : RULE_HOLD;
+    for (const node of el.rules) node.textContent = rule;
+    if (el.canvas) {
+      el.canvas.setAttribute(
+        "aria-label",
+        swipe
+          ? "プレイ画面。跳びたい向きに指をはらうと跳べます"
+          : "プレイ画面。左右を押してため、はなすと跳べます",
+      );
+    }
+  }
+
+  /** @param {(mode: "hold" | "swipe") => void} fn */
+  function onControlModeChange(fn) {
+    for (const btn of el.modeBtns) {
+      btn.addEventListener("click", () => {
+        const mode = btn.dataset.mode === "swipe" ? "swipe" : "hold";
+        applyControlMode(mode);
+        fn?.(mode);
+      });
     }
   }
 
@@ -135,5 +174,7 @@ export function bindScreens(root = document) {
     updateHud,
     setHintsVisible,
     setCopyStatus,
+    applyControlMode,
+    onControlModeChange,
   };
 }

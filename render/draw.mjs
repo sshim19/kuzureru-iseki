@@ -8,6 +8,7 @@ import {
   LEDGE_H,
   MAX_SHARDS,
   PALETTE,
+  CHARGE_MIN,
 } from "../engine/constants.mjs";
 import { hashSeed } from "../engine/rng.mjs";
 
@@ -328,7 +329,8 @@ function drawShadow(ctx, view, player) {
 
 function poseOf(player) {
   const p = player.pose;
-  if (p === "jump" || p === "fall" || p === "stand") return p;
+  if (p === "jump" || p === "fall" || p === "stand" || p === "crouch") return p;
+  if (player.charging && player.grounded) return "crouch";
   if (player.grounded) return "stand";
   return player.vy > 0 ? "jump" : "fall";
 }
@@ -347,6 +349,10 @@ function tracePlayer(ctx, pose) {
     ctx.fillStyle = EDGE[3];
     ctx.fillRect(-5.2, 0, 3.4, 10);
     ctx.fillRect(1.2, 1, 3.4, 9);
+  } else if (pose === "crouch") {
+    ctx.fillStyle = EDGE[3];
+    ctx.fillRect(-5.2, 0, 4.2, 7);
+    ctx.fillRect(0.6, 0, 4.2, 7);
   } else {
     ctx.fillStyle = EDGE[3];
     ctx.fillRect(-4.4, 0, 3.4, 11);
@@ -366,6 +372,11 @@ function tracePlayer(ctx, pose) {
     ctx.lineTo(9, 11);
     ctx.lineTo(7, 22);
     ctx.lineTo(-8, 22);
+  } else if (pose === "crouch") {
+    ctx.moveTo(-8.5, 6);
+    ctx.lineTo(8.5, 6);
+    ctx.lineTo(7.2, 16);
+    ctx.lineTo(-8, 16);
   } else {
     ctx.moveTo(-7.5, 10);
     ctx.lineTo(7.5, 10);
@@ -379,10 +390,11 @@ function tracePlayer(ctx, pose) {
   ctx.stroke();
 
   // 帯
+  const beltY = pose === "crouch" ? 9.2 : 14.2;
   ctx.fillStyle = CLOTH[0];
-  ctx.fillRect(-7.2, 14.2, 14.4, 3.2);
+  ctx.fillRect(-7.2, beltY, 14.4, 3.2);
   ctx.fillStyle = CLOTH[1];
-  ctx.fillRect(-7.2, 16.4, 14.4, 1.1);
+  ctx.fillRect(-7.2, beltY + 2.2, 14.4, 1.1);
 
   // 腕
   ctx.strokeStyle = CREAM[0];
@@ -399,6 +411,11 @@ function tracePlayer(ctx, pose) {
     ctx.lineTo(12, 16);
     ctx.moveTo(-6, 18);
     ctx.lineTo(-12, 17);
+  } else if (pose === "crouch") {
+    ctx.moveTo(6, 12);
+    ctx.quadraticCurveTo(9, 8, 8, 5);
+    ctx.moveTo(-6, 12);
+    ctx.quadraticCurveTo(-9, 8, -8, 5);
   } else {
     ctx.moveTo(6, 18);
     ctx.quadraticCurveTo(8, 14, 7.5, 9);
@@ -408,7 +425,7 @@ function tracePlayer(ctx, pose) {
   ctx.stroke();
 
   // 頭と髪
-  const hy = pose === "jump" ? 24.5 : 24;
+  const hy = pose === "jump" ? 24.5 : pose === "crouch" ? 18 : 24;
   ctx.fillStyle = "#e8d0b0";
   ctx.beginPath();
   ctx.arc(0.6, hy, 5.1, 0, Math.PI * 2);
@@ -433,6 +450,48 @@ function drawPlayer(ctx, view, player) {
   ctx.translate(view.sx(player.x), view.sy(player.y));
   ctx.scale(facing * s, -s);
   tracePlayer(ctx, pose);
+  ctx.restore();
+}
+
+function chargeFill(player) {
+  const raw = Math.max(0, Math.min(1, Number(player.charge) || 0));
+  return CHARGE_MIN + (1 - CHARGE_MIN) * raw;
+}
+
+/** Small arc near the player. Fill shows applied power (min already visible). */
+function drawChargeGauge(ctx, view, player, reducedMotion) {
+  const charging = player.charging;
+  const charge = Number(player.charge) || 0;
+  if (!charging && charge <= 0) return;
+  const fill = chargeFill(player);
+  const sx = view.sx(player.x);
+  const sy = view.sy(player.y) - view.px(player.pose === "crouch" ? 26 : 34);
+  const r = view.px(11);
+  const start = -Math.PI * 1.15;
+  const span = Math.PI * 1.3;
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineWidth = Math.max(2, view.px(2.4));
+  ctx.strokeStyle = "rgba(58, 39, 24, 0.45)";
+  ctx.beginPath();
+  ctx.arc(sx, sy, r, start, start + span);
+  ctx.stroke();
+  ctx.lineWidth = Math.max(2.2, view.px(2.6));
+  const moss = MOSS[0];
+  const cloth = CLOTH[0];
+  ctx.strokeStyle = fill >= 0.97 ? cloth : moss;
+  ctx.beginPath();
+  ctx.arc(sx, sy, r, start, start + span * fill);
+  ctx.stroke();
+  if (fill >= 0.97 && !reducedMotion) {
+    ctx.strokeStyle = CREAM[1];
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = Math.max(1, view.px(1.2));
+    ctx.beginPath();
+    ctx.arc(sx, sy, r, start, start + span);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
   ctx.restore();
 }
 
@@ -506,6 +565,7 @@ export function drawScene(ctx, state, opts = {}) {
     if (p.y + PLAYER_H >= view.bottom - 40 && p.y <= view.top + 40) {
       drawShadow(ctx, view, p);
       drawPlayer(ctx, view, p);
+      drawChargeGauge(ctx, view, p, reducedMotion);
     }
   }
 

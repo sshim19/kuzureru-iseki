@@ -17,29 +17,37 @@ export const CHARGE_MIN = 0.45;
 /** Sampled powers for reachability / generation fairness. */
 export const CHARGE_SAMPLES = [0.45, 0.52, 0.6, 0.68, 0.76, 0.84, 0.92, 1];
 
-/** Horizontal jump speed at power 0 and 1; sign comes from facing. */
-export const JUMP_VX_MIN = 110;
-export const JUMP_VX_MAX = 230;
-/** Upward jump speed at power 0 and 1. Apex at 1 is ≈ 136 wu. */
-export const JUMP_VY_MIN = 360;
-export const JUMP_VY_MAX = 700;
-/** Mid-power aliases (power 0.625): kept for any leftover mid-arc math. */
+/** Horizontal jump speed at power 0 and 1; sign comes from facing.
+ *  Strong vx scale so a short hop undershoots and a full charge overshoots. */
+export const JUMP_VX_MIN = 70;
+export const JUMP_VX_MAX = 290;
+/** Upward jump speed at power 0 and 1. Apex ≈ 75–114 wu; height mainly
+ *  has to clear the gap, while horizontal travel is the skill. */
+export const JUMP_VY_MIN = 520;
+export const JUMP_VY_MAX = 640;
+/** Mid-power aliases. */
 export const JUMP_VX = JUMP_VX_MIN + (JUMP_VX_MAX - JUMP_VX_MIN) * 0.625;
 export const JUMP_VY = JUMP_VY_MIN + (JUMP_VY_MAX - JUMP_VY_MIN) * 0.625;
 
 export const LEDGE_H = 14;
 export const COLS = [70, 180, 290];
 export const GAP_MIN = 44;
-export const GAP_MAX = 118;
+export const GAP_MAX = 96;
+export const LEDGE_W_MIN = 10;
+export const LEDGE_W_MAX = 56;
 
 export const BUFFER_TIME = 0.1;
 export const COYOTE_TIME = 0.1;
-export const LAND_SLOP_X = 4;
-export const LAND_SLOP_Y = 3;
+/** Landing uses a narrow foot, not the full body, so charge windows stay tight. */
+export const LAND_FOOT_W = 8;
+export const LAND_SLOP_X = 0;
+export const LAND_SLOP_Y = 2;
 export const FIXED_DT = 1 / 60;
 export const MAX_DT = 0.05;
 
 export const FAIL_BELOW = 8;
+/** Fly past the screen edge (no wall clamp) and the run ends. */
+export const FAIL_SIDE = 12;
 
 /**
  * Camera contract (Y-up):
@@ -61,7 +69,7 @@ export const START_FLOOR_X = 20;
 export const START_FLOOR_W = 320;
 export const FIRST_ROWS = 3;
 export const FIRST_CRUMBLE = 2.0;
-export const FIRST_WIDTH = 96;
+export const FIRST_WIDTH = 40;
 export const START_CRUMBLE = 2.0;
 export const HINT_JUMPS = 3;
 export const MAX_SHARDS = 40;
@@ -83,13 +91,17 @@ export const PALETTE = {
 };
 
 /** Height bands: crumble / warn / width / gap, and how often only one side is offered. */
+/** windowMin/Max: landing power window in [CHARGE_MIN, 1] for each next ledge. */
 export const BANDS = [
-  { upToM: 15, crumbleIn: 1.8, warn: 0.5, width: 88, gapMin: 44, gapMax: 88, oneSideChance: 0 },
-  { upToM: 40, crumbleIn: 1.4, warn: 0.45, width: 80, gapMin: 48, gapMax: 96, oneSideChance: 0 },
-  { upToM: 80, crumbleIn: 1.1, warn: 0.4, width: 72, gapMin: 50, gapMax: 104, oneSideChance: 0.15 },
-  { upToM: 130, crumbleIn: 0.85, warn: 0.35, width: 68, gapMin: 54, gapMax: 112, oneSideChance: 0.3 },
-  { upToM: Infinity, crumbleIn: 0.65, warn: 0.3, width: 64, gapMin: 58, gapMax: 118, oneSideChance: 0.55 },
+  { upToM: 15, crumbleIn: 1.8, warn: 0.5, width: 40, gapMin: 44, gapMax: 70, oneSideChance: 0, windowMin: 0.16, windowMax: 0.18 },
+  { upToM: 40, crumbleIn: 1.4, warn: 0.45, width: 34, gapMin: 46, gapMax: 78, oneSideChance: 0, windowMin: 0.14, windowMax: 0.17 },
+  { upToM: 80, crumbleIn: 1.1, warn: 0.4, width: 28, gapMin: 50, gapMax: 86, oneSideChance: 0.15, windowMin: 0.12, windowMax: 0.16 },
+  { upToM: 130, crumbleIn: 0.85, warn: 0.35, width: 24, gapMin: 54, gapMax: 92, oneSideChance: 0.3, windowMin: 0.11, windowMax: 0.15 },
+  { upToM: Infinity, crumbleIn: 0.65, warn: 0.3, width: 20, gapMin: 58, gapMax: 96, oneSideChance: 0.55, windowMin: 0.10, windowMax: 0.14 },
 ];
+
+export const TUTORIAL_WINDOW_MIN = 0.16;
+export const TUTORIAL_WINDOW_MAX = 0.18;
 
 export function bandAtY(y) {
   const m = y / METER;

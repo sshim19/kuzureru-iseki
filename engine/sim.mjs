@@ -18,7 +18,7 @@ import {
   GRAVITY,
 } from "./constants.mjs";
 import { hash32 } from "./rng.mjs";
-import { integrate, applyJump, findLanding, landingOverlapX, chargePower } from "./physics.mjs";
+import { integrate, applyJump, findLanding, landingOverlapX, chargePower, isOffScreen } from "./physics.mjs";
 import { generateLedges } from "./generate.mjs";
 
 function cloneState(s) {
@@ -159,6 +159,7 @@ function step(state, dt) {
       p.vx = 0;
       p.vy = 0;
       p.y = under.y;
+      p.x = under.x + under.w / 2;
       p.pose = p.charging ? "crouch" : "stand";
     }
   }
@@ -169,6 +170,7 @@ function step(state, dt) {
     const hit = findLanding(p, prevY, state.ledges);
     if (hit) {
       p.y = hit.y;
+      p.x = hit.x + hit.w / 2;
       p.vy = 0;
       p.vx = 0;
       p.grounded = true;
@@ -188,7 +190,7 @@ function step(state, dt) {
   updateCrumble(state, dt);
   ensureLedges(state);
 
-  if (p.y < state.cameraY - FAIL_BELOW) state.status = "over";
+  if (p.y < state.cameraY - FAIL_BELOW || isOffScreen(p.x)) state.status = "over";
 }
 
 /**

@@ -32,7 +32,11 @@
         <section class="panel" id="screen-title">
           <h1 tabindex="-1">崩れる遺跡の脱出</h1>
           <p class="lead">足場が崩れる前に、上へ登ろう。</p>
-          <p class="rule">左か右を押してためて、はなすとその向きに跳べます。長く押すほど、高く遠くまで跳べます。</p>
+          <div class="mode-toggle" role="radiogroup" aria-label="操作方法">
+            <button type="button" class="mode-opt" data-mode="hold" aria-pressed="true">長押し</button>
+            <button type="button" class="mode-opt" data-mode="swipe" aria-pressed="false">スワイプ</button>
+          </div>
+          <p class="rule" id="title-rule">左か右を押してためて、はなすとその向きに跳べます。長く押すほど、高く遠くまで跳べます。</p>
           <p class="meta" id="title-date">今日の遺跡</p>
           <p class="meta" id="title-record">記録はまだありません</p>
           <button type="button" class="action" id="btn-start">のぼる</button>
@@ -45,6 +49,11 @@
           <p class="meta" id="over-best"></p>
           <p class="banner" id="over-new-best" hidden>最高記録です</p>
           <p class="banner" id="over-new-today" hidden>今日の最高です</p>
+          <div class="mode-toggle" role="radiogroup" aria-label="操作方法">
+            <button type="button" class="mode-opt" data-mode="hold" aria-pressed="true">長押し</button>
+            <button type="button" class="mode-opt" data-mode="swipe" aria-pressed="false">スワイプ</button>
+          </div>
+          <p class="rule" id="over-rule">左か右を押してためて、はなすとその向きに跳べます。長く押すほど、高く遠くまで跳べます。</p>
           <div class="actions">
             <button type="button" class="action" id="btn-retry">もう一度</button>
             <button type="button" class="action action-secondary" id="btn-copy">結果をコピー</button>

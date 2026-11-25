@@ -11,7 +11,8 @@
  *   ledge.x は左端、ledge.y は上面。
  */
 import { tick, createInitialState } from "./engine/sim.mjs";
-import { MAX_DT } from "./engine/constants.mjs";
+import { MAX_DT, BUFFER_TIME } from "./engine/constants.mjs";
+import { chargePower } from "./engine/physics.mjs";
 import { drawScene } from "./render/draw.mjs";
 import { bindScreens } from "./render/screens.mjs";
 import {
@@ -48,6 +49,82 @@ let activePointer = null;
 let lastTs = 0;
 let lastShare = shareText({ dateLabel, heightM: 0 });
 
+const STORAGE_MODE = "kuzureru-iseki:controlMode";
+/** Horizontal CSS px: below this, release cancels (no jump). */
+const SWIPE_CANCEL_PX = 12;
+/** Horizontal CSS px that maps to minimum power (CHARGE_MIN). */
+const SWIPE_MIN_PX = 20;
+/** Cap for the distance that maps to full power. */
+const SWIPE_MAX_CAP_PX = 180;
+/** Also cap full-power distance at this fraction of the screen width. */
+const SWIPE_MAX_FRAC = 0.4;
+
+let controlMode = loadControlMode();
+/** @type {null | { id: number, x0: number, y0: number, x: number, y: number, dir: -1 | 0 | 1 }} */
+let swipe = null;
+
+function loadControlMode() {
+  try {
+    return globalThis.localStorage?.getItem(STORAGE_MODE) === "swipe" ? "swipe" : "hold";
+  } catch {
+    return "hold";
+  }
+}
+
+function saveControlMode(mode) {
+  controlMode = mode === "swipe" ? "swipe" : "hold";
+  try {
+    globalThis.localStorage?.setItem(STORAGE_MODE, controlMode);
+  } catch {
+    /* ignore quota / private mode */
+  }
+  screens.applyControlMode(controlMode);
+}
+
+function swipeMaxPx() {
+  const w = Number(window.visualViewport?.width || window.innerWidth || 390);
+  return Math.max(SWIPE_MIN_PX + 1, Math.min(SWIPE_MAX_CAP_PX, SWIPE_MAX_FRAC * w));
+}
+
+/** Swipe distance in CSS px → raw charge 0–1 (engine maps that to power 0.45–1). */
+function swipeChargeFromDx(dx) {
+  const dist = Math.abs(dx);
+  const span = swipeMaxPx() - SWIPE_MIN_PX;
+  if (span <= 0) return dist >= SWIPE_MIN_PX ? 1 : 0;
+  return Math.max(0, Math.min(1, (dist - SWIPE_MIN_PX) / span));
+}
+
+function applySwipePreview() {
+  if (controlMode !== "swipe" || !swipe || state.status !== "playing") return;
+  const dx = swipe.x - swipe.x0;
+  if (dx > 0) swipe.dir = 1;
+  else if (dx < 0) swipe.dir = -1;
+  if (!swipe.dir) return;
+  const p = state.player;
+  p.facing = swipe.dir;
+  // Do not set charging: the engine treats charging→no-hold as a jump release.
+  // charge>0 is enough for the existing gauge; 0 maps to min power, so use a
+  // tiny epsilon until the swipe reaches SWIPE_MIN_PX.
+  p.charge = Math.max(swipeChargeFromDx(dx), 1e-4);
+  if (p.grounded) p.pose = "crouch";
+}
+
+function commitSwipeJump() {
+  if (!swipe) return;
+  const dx = swipe.x - swipe.x0;
+  const dist = Math.abs(dx);
+  const dir = swipe.dir || (dx > 0 ? 1 : dx < 0 ? -1 : 0);
+  swipe = null;
+  if (state.status !== "playing" || !dir || dist < SWIPE_CANCEL_PX) return;
+  const raw = swipeChargeFromDx(dx);
+  const p = state.player;
+  p.charge = raw;
+  p.pendingPower = chargePower(raw);
+  p.buffer = BUFFER_TIME;
+  p.facing = dir;
+  p.charging = 0;
+}
+
 function titleStateFrom(bests) {
   const playing = createInitialState({
     seed,
@@ -64,6 +141,7 @@ function freshRun() {
   holdLeft = false;
   holdRight = false;
   activePointer = null;
+  swipe = null;
   return createInitialState({
     seed,
     dateJst,
@@ -100,6 +178,7 @@ function clearHolds() {
   holdLeft = false;
   holdRight = false;
   activePointer = null;
+  swipe = null;
 }
 
 function paint() {
@@ -122,6 +201,7 @@ function frame(ts) {
       finishRun(next);
     } else {
       state = next;
+      applySwipePreview();
     }
   } else {
     clearHolds();
@@ -158,40 +238,63 @@ screens.el.btnCopy?.addEventListener("click", async () => {
   screens.setCopyStatus(ok);
 });
 
-function pointerOnCanvas(e) {
+function pointerDown(e) {
   if (state.status !== "playing") return;
   if (e.isPrimary === false) return;
-  if (activePointer != null && e.pointerId !== activePointer) return;
-  if (e.type === "pointerdown") {
-    if (activePointer != null) return;
-    activePointer = e.pointerId;
+  if (activePointer != null) return;
+  activePointer = e.pointerId;
+  try {
+    canvas.setPointerCapture(e.pointerId);
+  } catch {
+    /* ignore */
+  }
+  if (controlMode === "swipe") {
+    swipe = { id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, dir: 0 };
+  } else {
     const rect = canvas.getBoundingClientRect();
     const mid = rect.left + rect.width / 2;
-    const side = e.clientX < mid ? "left" : "right";
-    holdLeft = side === "left";
-    holdRight = side === "right";
-    try {
-      canvas.setPointerCapture(e.pointerId);
-    } catch {
-      /* ignore */
-    }
+    holdLeft = e.clientX < mid;
+    holdRight = !holdLeft;
   }
   if (e.cancelable) e.preventDefault();
 }
 
-function clearPointer(e) {
+function pointerMove(e) {
+  if (state.status !== "playing") return;
+  if (e.cancelable) e.preventDefault();
+  if (controlMode !== "swipe" || !swipe || e.pointerId !== swipe.id) return;
+  swipe.x = e.clientX;
+  swipe.y = e.clientY;
+  const dx = swipe.x - swipe.x0;
+  if (dx > 0) swipe.dir = 1;
+  else if (dx < 0) swipe.dir = -1;
+}
+
+function pointerUp(e) {
   if (e.pointerId !== activePointer) return;
+  if (controlMode === "swipe" && swipe && e.pointerId === swipe.id) {
+    // Prefer last move; some pointerup/cancel events have unusable coordinates.
+    if (
+      e.type !== "pointercancel" &&
+      Number.isFinite(e.clientX) &&
+      Number.isFinite(e.clientY) &&
+      Math.abs(e.clientX - swipe.x) < 240 &&
+      Math.abs(e.clientY - swipe.y) < 240
+    ) {
+      swipe.x = e.clientX;
+      swipe.y = e.clientY;
+    }
+    commitSwipeJump();
+  }
   activePointer = null;
   holdLeft = false;
   holdRight = false;
 }
 
-canvas.addEventListener("pointerdown", pointerOnCanvas);
-canvas.addEventListener("pointermove", (e) => {
-  if (state.status === "playing" && e.cancelable) e.preventDefault();
-});
-canvas.addEventListener("pointerup", clearPointer);
-canvas.addEventListener("pointercancel", clearPointer);
+canvas.addEventListener("pointerdown", pointerDown, { passive: false });
+canvas.addEventListener("pointermove", pointerMove, { passive: false });
+canvas.addEventListener("pointerup", pointerUp, { passive: false });
+canvas.addEventListener("pointercancel", pointerUp, { passive: false });
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 window.addEventListener(
@@ -201,6 +304,7 @@ window.addEventListener(
       e.preventDefault();
       if (e.repeat) return;
       if (state.status !== "playing") return;
+      swipe = null;
       if (e.key === "ArrowLeft") holdLeft = true;
       if (e.key === "ArrowRight") holdRight = true;
     }
@@ -221,6 +325,8 @@ window.addEventListener(
   { passive: false },
 );
 
+screens.onControlModeChange(saveControlMode);
+screens.applyControlMode(controlMode);
 screens.showTitle({ dateLabel, bestM: stored.bestM });
 screens.updateHud({ heightM: 0, bestM: stored.bestM });
 paint();

@@ -92,9 +92,64 @@ export function saveBests({ dateJst, heightM }, storage = globalThis.localStorag
  * 改行3行。配置や答えは出さない。
  * @param {{ dateLabel: string, heightM: number }} rec
  */
+export const GAME_TITLE = "崩れる遺跡の脱出";
+
 export function shareText({ dateLabel, heightM }) {
   const h = Math.max(0, Math.floor(Number(heightM) || 0));
-  return `崩れる遺跡の脱出\n${dateLabel}\n${h}m`;
+  return `${GAME_TITLE}\n${dateLabel}\n${h}m`;
+}
+
+/**
+ * 公開ページの URL。query / hash は付けない。file: は空文字。
+ * @param {Pick<Location, "origin" | "protocol" | "pathname">} [loc]
+ */
+export function sharePageUrl(loc = globalThis.location) {
+  if (!loc || loc.protocol === "file:" || !loc.origin || loc.origin === "null") return "";
+  let path = String(loc.pathname || "/");
+  path = path.replace(/\/index\.html$/i, "/");
+  if (!path) path = "/";
+  return `${loc.origin}${path}`;
+}
+
+/** @param {{ text: string, url?: string }} rec */
+export function tweetShareUrl({ text, url = "" }) {
+  const params = new URLSearchParams();
+  if (text) params.set("text", text);
+  if (url) params.set("url", url);
+  return `https://twitter.com/intent/tweet?${params.toString()}`;
+}
+
+/** 結果文と URL を本文に載せる（lineit は URL のみ）。 */
+/** @param {{ text: string, url?: string }} rec */
+export function lineShareUrl({ text, url = "" }) {
+  const body = [text, url].filter(Boolean).join("\n");
+  return `https://line.me/R/share?text=${encodeURIComponent(body)}`;
+}
+
+export function canUseNativeShare() {
+  return typeof navigator !== "undefined" && typeof navigator.share === "function";
+}
+
+/** @param {File[]} files */
+export function canShareFiles(files) {
+  try {
+    return !!(
+      files?.length &&
+      typeof navigator?.canShare === "function" &&
+      navigator.canShare({ files })
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function isShareAbort(err) {
+  return !!err && (err.name === "AbortError" || err.name === "Abort");
+}
+
+/** @param {{ text: string, url?: string }} rec */
+export function shareCopyText({ text, url = "" }) {
+  return url ? `${text}\n${url}` : text;
 }
 
 /** @param {string} text @returns {Promise<boolean>} */

@@ -29,7 +29,11 @@ export function bindScreens(root = document) {
     overNewBest: root.querySelector("#over-new-best"),
     overNewToday: root.querySelector("#over-new-today"),
     btnRetry: root.querySelector("#btn-retry"),
+    btnShare: root.querySelector("#btn-share"),
     btnCopy: root.querySelector("#btn-copy"),
+    btnShareX: root.querySelector("#btn-share-x"),
+    btnShareLine: root.querySelector("#btn-share-line"),
+    btnShareIg: root.querySelector("#btn-share-ig"),
     btnQuit: root.querySelector("#btn-quit"),
     copyStatus: root.querySelector("#copy-status"),
     canvas: root.querySelector("#game"),
@@ -132,7 +136,8 @@ export function bindScreens(root = document) {
     if (el.overBest) el.overBest.textContent = `これまでの最高 ${data.bestM}m`;
     hide(el.overNewBest, !data.isNewBest);
     hide(el.overNewToday, !data.isNewTodayBest);
-    setCopyStatus(null);
+    setShareStatus(null);
+    applyShareAvailability();
     focusHeading(el.overHeading);
   }
 
@@ -154,16 +159,28 @@ export function bindScreens(root = document) {
     hide(el.hints, !(hintJumpsLeft > 0));
   }
 
-  /** @param {boolean | null} ok */
-  function setCopyStatus(ok) {
+  /** @param {string | null} message */
+  function setShareStatus(message) {
     if (!el.copyStatus) return;
-    if (ok == null) {
+    if (message == null || message === "") {
       el.copyStatus.hidden = true;
       el.copyStatus.textContent = "";
       return;
     }
     el.copyStatus.hidden = false;
-    el.copyStatus.textContent = ok ? "コピーしました" : "コピーできませんでした";
+    el.copyStatus.textContent = message;
+  }
+
+  /** @param {boolean | null} ok */
+  function setCopyStatus(ok) {
+    if (ok == null) setShareStatus(null);
+    else setShareStatus(ok ? "コピーしました" : "コピーできませんでした");
+  }
+
+  /** navigator.share があるときだけ「結果を共有」。なければ「結果をコピー」。 */
+  function applyShareAvailability(native = typeof navigator !== "undefined" && typeof navigator.share === "function") {
+    hide(el.btnShare, !native);
+    hide(el.btnCopy, !!native);
   }
 
   return {
@@ -174,6 +191,8 @@ export function bindScreens(root = document) {
     updateHud,
     setHintsVisible,
     setCopyStatus,
+    setShareStatus,
+    applyShareAvailability,
     applyControlMode,
     onControlModeChange,
   };

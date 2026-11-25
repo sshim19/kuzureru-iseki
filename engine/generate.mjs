@@ -14,6 +14,7 @@ import {
   TUTORIAL_WINDOW_MIN,
   TUTORIAL_WINDOW_MAX,
   WINDOW_FLOOR,
+  WINDOW_CEILING,
   bandAtY,
   GRAVITY,
   LAND_SLOP_Y,
@@ -24,8 +25,8 @@ import { canReachAtPower, jumpVelocity, measureLandingWindow, clampOntoLedge } f
 const EDGE = 8;
 const SIZE = {
   short: { lo: 14, hi: 30 },
-  medium: { lo: 32, hi: 60 },
-  wide: { lo: 60, hi: 110 },
+  medium: { lo: 32, hi: 55 },
+  wide: { lo: 56, hi: 72 },
 };
 
 function startFloor() {
@@ -73,12 +74,12 @@ function clampLedgeX(x, w) {
 }
 
 function pickSizeClass(rng, tutorial, band) {
-  const shortChance = tutorial ? 0.04 : (band.shortChance ?? 0.2);
+  const shortChance = tutorial ? 0.08 : (band.shortChance ?? 0.2);
+  const wideShare = tutorial ? 0.38 : (band.wideShare ?? 0.35);
   const r = rng();
   if (r < shortChance) return "short";
-  // Remaining split evenly between medium and wide (~40/40 overall when short is 20%).
-  if (r < shortChance + (1 - shortChance) * 0.5) return "medium";
-  return "wide";
+  if (r < shortChance + wideShare) return "wide";
+  return "medium";
 }
 
 function pickWidth(rng, cls) {
@@ -128,14 +129,17 @@ function placeFromSource(id, y, crumbleIn, src, dir, rng, tutorial, band) {
     let win = measureLandingWindow(src.x, src.y, dir, ledge);
 
     const classMin = SIZE[cls].lo;
-    for (let adj = 0; adj < 10 && win.ok; adj++) {
-      const tooNarrow = win.width < WINDOW_FLOOR;
+    const cap = cls === "wide" ? WINDOW_CEILING : Math.min(WINDOW_CEILING, typ + 0.02);
+    for (let adj = 0; adj < 12 && win.ok; adj++) {
+      const tooNarrow = win.width < (cls === "wide" ? WINDOW_FLOOR : Math.max(WINDOW_FLOOR, winMin - 0.03));
+      const tooWide = win.width > cap + 1e-6;
       const needMargin = !hasMargins(win);
-      if (!tooNarrow && !needMargin) break;
-      if (tooNarrow) w = Math.min(LEDGE_W_MAX, w + 6);
-      else if (needMargin && cls !== "wide") {
-        // Keep the size class; shrink only down to the class min (never crush wides).
-        const nextW = w - 4 >= classMin ? w - 4 : w;
+      if (!tooNarrow && !tooWide && !needMargin) break;
+      if (tooNarrow && !tooWide) w = Math.min(LEDGE_W_MAX, w + 4);
+      else if (tooWide || needMargin) {
+        // Wides may stay at 56+ until they clearly exceed the ceiling.
+        const floorW = (cls === "wide" && win.width <= WINDOW_CEILING + 0.03) ? 56 : (tooWide ? LEDGE_W_MIN : classMin);
+        const nextW = w - 3 >= floorW ? w - 3 : w;
         if (nextW === w) break;
         w = nextW;
       } else {
@@ -148,12 +152,12 @@ function placeFromSource(id, y, crumbleIn, src, dir, rng, tutorial, band) {
 
     if (!win.ok) continue;
     if (win.width + 1e-6 < WINDOW_FLOOR) continue;
-    const inBand = win.width >= winMin - 0.04 && win.width <= winMax + 0.06;
+    if (win.width > WINDOW_CEILING + 0.03) continue;
     const okMargins = hasMargins(win);
-    if (win.ok && win.width >= WINDOW_FLOOR && (okMargins || cls === "wide")) {
+    if (okMargins || cls === "wide") {
       return { ledge, takeoffX: win.x ?? atMid.x, dir, win };
     }
-    if (win.ok && win.width >= WINDOW_FLOOR && okMargins) {
+    if (okMargins) {
       if (!fallback || Math.abs(win.width - typ) < Math.abs(fallback.win.width - typ)) {
         fallback = { ledge, takeoffX: win.x ?? atMid.x, dir, win };
       }
@@ -167,20 +171,20 @@ function placeFromSource(id, y, crumbleIn, src, dir, rng, tutorial, band) {
   if (midPower < 0.95) {
     const atMid = canReachAtPower(src.x, src.y, dir, slab, midPower);
     if (atMid.ok) {
-      let w = randRange(rng, 36, 80);
+      let w = randRange(rng, 32, 64);
       let x = clampLedgeX(atMid.x - w / 2, w);
       let ledge = makeLedge(id, x, y, w, crumbleIn);
       let win = measureLandingWindow(src.x, src.y, dir, ledge);
       for (let adj = 0; adj < 10 && win.ok; adj++) {
-        if (win.width >= WINDOW_FLOOR && hasMargins(win)) break;
-        if (!win.ok || win.width < WINDOW_FLOOR) w = Math.min(LEDGE_W_MAX, w + 6);
-        else if (!hasMargins(win) && w > 32) w = Math.max(32, w - 4);
+        if (win.width >= WINDOW_FLOOR && win.width <= WINDOW_CEILING && hasMargins(win)) break;
+        if (!win.ok || win.width < WINDOW_FLOOR) w = Math.min(LEDGE_W_MAX, w + 4);
+        else if (win.width > WINDOW_CEILING || !hasMargins(win)) w = Math.max(LEDGE_W_MIN, w - 3);
         else break;
         x = clampLedgeX((win.x ?? atMid.x) - w / 2, w);
         ledge = makeLedge(id, x, y, w, crumbleIn);
         win = measureLandingWindow(src.x, src.y, dir, ledge);
       }
-      if (win.ok && win.width >= WINDOW_FLOOR && hasMargins(win)) {
+      if (win.ok && win.width >= WINDOW_FLOOR && win.width <= WINDOW_CEILING + 0.03 && hasMargins(win)) {
         return { ledge, takeoffX: win.x ?? atMid.x, dir, win };
       }
     }
@@ -218,8 +222,10 @@ function placeSharedCenter(id, y, crumbleIn, leftSrc, rightSrc, rng, tutorial, b
     let winL = measureLandingWindow(leftSrc.x, leftSrc.y, 1, ledge);
     let winR = measureLandingWindow(rightSrc.x, rightSrc.y, -1, ledge);
     for (let adj = 0; adj < 8; adj++) {
-      const okL = winL.ok && winL.width >= WINDOW_FLOOR && hasMargins(winL);
-      const okR = winR.ok && winR.width >= WINDOW_FLOOR && hasMargins(winR);
+      const underCeil = (win) => win.ok && win.width <= WINDOW_CEILING + 0.03;
+      const okL = winL.ok && winL.width >= WINDOW_FLOOR && underCeil(winL) && hasMargins(winL);
+      const okR = winR.ok && winR.width >= WINDOW_FLOOR && underCeil(winR) && hasMargins(winR);
+      const okWide = cls === "wide" && winL.ok && winR.ok && winL.width >= WINDOW_FLOOR && winR.width >= WINDOW_FLOOR && underCeil(winL) && underCeil(winR);
       if (okL && okR) {
         return [
           { ledge, takeoffX: winL.x ?? fromL.x, dir: 1, win: winL },
@@ -227,10 +233,11 @@ function placeSharedCenter(id, y, crumbleIn, leftSrc, rightSrc, rng, tutorial, b
         ];
       }
       const tooNarrow = !winL.ok || !winR.ok || winL.width < WINDOW_FLOOR || winR.width < WINDOW_FLOOR;
+      const tooWide = (winL.ok && winL.width > WINDOW_CEILING) || (winR.ok && winR.width > WINDOW_CEILING);
       const needMargin = (winL.ok && !hasMargins(winL)) || (winR.ok && !hasMargins(winR));
-      if (tooNarrow) w = Math.min(LEDGE_W_MAX, w + 6);
-      else if (needMargin && cls !== "wide" && w - 4 >= classMin) w = w - 4;
-      else if (winL.ok && winR.ok && winL.width >= WINDOW_FLOOR && winR.width >= WINDOW_FLOOR && cls === "wide") {
+      if (tooNarrow && !tooWide) w = Math.min(LEDGE_W_MAX, w + 4);
+      else if (tooWide || (needMargin && w - 3 >= LEDGE_W_MIN)) w = Math.max(LEDGE_W_MIN, w - 3);
+      else if (okWide) {
         return [
           { ledge, takeoffX: winL.x ?? fromL.x, dir: 1, win: winL },
           { ledge, takeoffX: winR.x ?? fromR.x, dir: -1, win: winR },
@@ -278,15 +285,23 @@ function widenToCover(placed, src, samples) {
   let w = ledge.w;
   let x = ledge.x;
   const cx = placed.takeoffX ?? ledge.x + ledge.w / 2;
-  for (let i = 0; i < 8 && !coversSamples(samples, y, ledge); i++) {
-    w = Math.min(LEDGE_W_MAX, w + 8);
-    x = clampLedgeX(cx - w / 2, w);
-    ledge = makeLedge(ledge.id, x, ledge.y, w, ledge.crumbleIn);
+  for (let i = 0; i < 6 && !coversSamples(samples, y, ledge); i++) {
+    const probeW = Math.min(LEDGE_W_MAX, w + 4);
+    if (probeW === w) break;
+    const probe = makeLedge(ledge.id, clampLedgeX(cx - probeW / 2, probeW), ledge.y, probeW, ledge.crumbleIn);
+    const win = bestWindowFrom(src.x, y, probe);
+    if (win.ok && win.width > WINDOW_CEILING + 0.03) break;
+    w = probeW;
+    x = probe.x;
+    ledge = probe;
   }
-  if (!coversSamples(samples, y, ledge)) return placed;
+  if (!coversSamples(samples, y, ledge)) {
+    return placed; // keep original rather than inflating past the ceiling
+  }
   const win = placed.win && placed.win.dir != null
     ? measureLandingWindow(src.x, src.y, placed.dir, ledge)
     : bestWindowFrom(src.x, y, ledge);
+  if (win.ok && win.width > WINDOW_CEILING + 0.03) return placed;
   return {
     ...placed,
     ledge,

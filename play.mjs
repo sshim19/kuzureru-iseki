@@ -6,7 +6,8 @@
  *   tick(state, input, dt) → 新しい state（非破壊）。dt は秒。内部で 1/60 固定＋最大 50ms。
  *   generateLedges は tick 内で呼ばれるため、プレイ中にこちらでは呼ばない。
  *   cameraY は画面下端のワールド Y。可視 [cameraY, cameraY+VIEW_H)。Y は上向き。
- *   player.x は中心、player.y は足元。facing は -1|1、pose は 'stand'|'jump'|'fall'。
+ *   player.x は中心、player.y は足元。facing は -1|1、pose は 'stand'|'crouch'|'jump'|'fall'。
+ *   input は { holdLeft, holdRight }（押しっぱなしでため、離すと跳ぶ）。
  *   ledge.x は左端、ledge.y は上面。
  */
 import { tick, createInitialState } from "./engine/sim.mjs";
@@ -41,7 +42,8 @@ const seed = seedString(dateJst);
 let stored = loadBests(dateJst);
 let state = titleStateFrom(stored);
 let ended = false;
-let pendingJump = null;
+let holdLeft = false;
+let holdRight = false;
 let activePointer = null;
 let lastTs = 0;
 let lastShare = shareText({ dateLabel, heightM: 0 });
@@ -59,7 +61,8 @@ function titleStateFrom(bests) {
 function freshRun() {
   stored = loadBests(dateJst);
   ended = false;
-  pendingJump = null;
+  holdLeft = false;
+  holdRight = false;
   activePointer = null;
   return createInitialState({
     seed,
@@ -75,6 +78,7 @@ function finishRun(next) {
     return;
   }
   ended = true;
+  clearHolds();
   state = next.status === "over" ? next : { ...next, status: "over" };
   const saved = saveBests({ dateJst, heightM: state.heightM });
   stored = { bestM: saved.bestM, todayBestM: saved.todayBestM };
@@ -89,10 +93,13 @@ function finishRun(next) {
 }
 
 function takeInput() {
-  const jumpLeft = pendingJump === "left";
-  const jumpRight = pendingJump === "right";
-  pendingJump = null;
-  return { jumpLeft, jumpRight };
+  return { holdLeft, holdRight };
+}
+
+function clearHolds() {
+  holdLeft = false;
+  holdRight = false;
+  activePointer = null;
 }
 
 function paint() {
@@ -117,7 +124,7 @@ function frame(ts) {
       state = next;
     }
   } else {
-    pendingJump = null;
+    clearHolds();
   }
 
   paint();
@@ -160,7 +167,9 @@ function pointerOnCanvas(e) {
     activePointer = e.pointerId;
     const rect = canvas.getBoundingClientRect();
     const mid = rect.left + rect.width / 2;
-    pendingJump = e.clientX < mid ? "left" : "right";
+    const side = e.clientX < mid ? "left" : "right";
+    holdLeft = side === "left";
+    holdRight = side === "right";
     try {
       canvas.setPointerCapture(e.pointerId);
     } catch {
@@ -171,7 +180,10 @@ function pointerOnCanvas(e) {
 }
 
 function clearPointer(e) {
-  if (e.pointerId === activePointer) activePointer = null;
+  if (e.pointerId !== activePointer) return;
+  activePointer = null;
+  holdLeft = false;
+  holdRight = false;
 }
 
 canvas.addEventListener("pointerdown", pointerOnCanvas);
@@ -189,11 +201,17 @@ window.addEventListener(
       e.preventDefault();
       if (e.repeat) return;
       if (state.status !== "playing") return;
-      pendingJump = e.key === "ArrowLeft" ? "left" : "right";
+      if (e.key === "ArrowLeft") holdLeft = true;
+      if (e.key === "ArrowRight") holdRight = true;
     }
   },
   { passive: false },
 );
+
+window.addEventListener("keyup", (e) => {
+  if (e.key === "ArrowLeft") holdLeft = false;
+  if (e.key === "ArrowRight") holdRight = false;
+});
 
 window.addEventListener(
   "touchmove",

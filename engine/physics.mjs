@@ -60,6 +60,20 @@ export function applyJump(player, dir, power = CHARGE_MIN) {
   player.pose = "jump";
 }
 
+/** Inset from the lips (more on wide bars) so a lip landing still has a fair next. */
+export function ledgeStandInset(w) {
+  return Math.min(Math.max(0, w) * 0.22, 24);
+}
+
+/** Keep x on the ledge top. Does not snap to center; only nudges off the lips. */
+export function clampOntoLedge(x, ledge) {
+  const inset = ledgeStandInset(ledge.w);
+  const lo = ledge.x + inset;
+  const hi = ledge.x + ledge.w - inset;
+  if (hi <= lo) return ledge.x + ledge.w / 2;
+  return Math.max(lo, Math.min(hi, x));
+}
+
 export function landingOverlapX(playerX, ledge) {
   const half = LAND_FOOT_W / 2 + LAND_SLOP_X;
   return playerX - half < ledge.x + ledge.w && playerX + half > ledge.x;

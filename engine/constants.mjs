@@ -33,14 +33,14 @@ export const LEDGE_H = 14;
 export const COLS = [70, 180, 290];
 export const GAP_MIN = 44;
 export const GAP_MAX = 96;
-export const LEDGE_W_MIN = 10;
-export const LEDGE_W_MAX = 56;
+export const LEDGE_W_MIN = 14;
+export const LEDGE_W_MAX = 110;
 
 export const BUFFER_TIME = 0.1;
 export const COYOTE_TIME = 0.1;
-/** Landing uses a narrow foot, not the full body, so charge windows stay tight. */
-export const LAND_FOOT_W = 8;
-export const LAND_SLOP_X = 0;
+/** Landing foot is a bit wider than the tight-skill version, plus a little x slop. */
+export const LAND_FOOT_W = 14;
+export const LAND_SLOP_X = 4;
 export const LAND_SLOP_Y = 2;
 export const FIXED_DT = 1 / 60;
 export const MAX_DT = 0.05;
@@ -69,7 +69,7 @@ export const START_FLOOR_X = 20;
 export const START_FLOOR_W = 320;
 export const FIRST_ROWS = 3;
 export const FIRST_CRUMBLE = 2.0;
-export const FIRST_WIDTH = 40;
+export const FIRST_WIDTH = 72;
 export const START_CRUMBLE = 2.0;
 export const HINT_JUMPS = 3;
 export const MAX_SHARDS = 40;
@@ -93,15 +93,16 @@ export const PALETTE = {
 /** Height bands: crumble / warn / width / gap, and how often only one side is offered. */
 /** windowMin/Max: landing power window in [CHARGE_MIN, 1] for each next ledge. */
 export const BANDS = [
-  { upToM: 15, crumbleIn: 1.8, warn: 0.5, width: 40, gapMin: 44, gapMax: 70, oneSideChance: 0, windowMin: 0.16, windowMax: 0.18 },
-  { upToM: 40, crumbleIn: 1.4, warn: 0.45, width: 34, gapMin: 46, gapMax: 78, oneSideChance: 0, windowMin: 0.14, windowMax: 0.17 },
-  { upToM: 80, crumbleIn: 1.1, warn: 0.4, width: 28, gapMin: 50, gapMax: 86, oneSideChance: 0.15, windowMin: 0.12, windowMax: 0.16 },
-  { upToM: 130, crumbleIn: 0.85, warn: 0.35, width: 24, gapMin: 54, gapMax: 92, oneSideChance: 0.3, windowMin: 0.11, windowMax: 0.15 },
-  { upToM: Infinity, crumbleIn: 0.65, warn: 0.3, width: 20, gapMin: 58, gapMax: 96, oneSideChance: 0.55, windowMin: 0.10, windowMax: 0.14 },
+  { upToM: 15, crumbleIn: 1.8, warn: 0.5, width: 72, gapMin: 44, gapMax: 80, oneSideChance: 0, windowMin: 0.24, windowMax: 0.34, shortChance: 0.08 },
+  { upToM: 40, crumbleIn: 1.4, warn: 0.45, width: 56, gapMin: 46, gapMax: 86, oneSideChance: 0, windowMin: 0.20, windowMax: 0.28, shortChance: 0.14 },
+  { upToM: 80, crumbleIn: 1.1, warn: 0.4, width: 48, gapMin: 48, gapMax: 92, oneSideChance: 0.12, windowMin: 0.18, windowMax: 0.26, shortChance: 0.20 },
+  { upToM: 130, crumbleIn: 0.85, warn: 0.35, width: 40, gapMin: 50, gapMax: 98, oneSideChance: 0.25, windowMin: 0.14, windowMax: 0.24, shortChance: 0.24 },
+  { upToM: Infinity, crumbleIn: 0.65, warn: 0.3, width: 36, gapMin: 52, gapMax: 102, oneSideChance: 0.4, windowMin: 0.12, windowMax: 0.22, shortChance: 0.28 },
 ];
 
-export const TUTORIAL_WINDOW_MIN = 0.16;
-export const TUTORIAL_WINDOW_MAX = 0.18;
+export const TUTORIAL_WINDOW_MIN = 0.26;
+export const TUTORIAL_WINDOW_MAX = 0.34;
+export const WINDOW_FLOOR = 0.12;
 
 export function bandAtY(y) {
   const m = y / METER;

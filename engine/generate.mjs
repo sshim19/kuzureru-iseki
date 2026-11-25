@@ -13,13 +13,20 @@ import {
   CHARGE_MIN,
   TUTORIAL_WINDOW_MIN,
   TUTORIAL_WINDOW_MAX,
+  WINDOW_FLOOR,
   bandAtY,
+  GRAVITY,
+  LAND_SLOP_Y,
 } from "./constants.mjs";
 import { createRng, randRange } from "./rng.mjs";
-import { canReachAtPower, jumpVelocity, measureLandingWindow } from "./physics.mjs";
-import { GRAVITY, LAND_FOOT_W, LAND_SLOP_Y } from "./constants.mjs";
+import { canReachAtPower, jumpVelocity, measureLandingWindow, clampOntoLedge } from "./physics.mjs";
 
-const EDGE = 10;
+const EDGE = 8;
+const SIZE = {
+  short: { lo: 14, hi: 30 },
+  medium: { lo: 32, hi: 60 },
+  wide: { lo: 60, hi: 110 },
+};
 
 function startFloor() {
   return {
@@ -65,93 +72,128 @@ function clampLedgeX(x, w) {
   return Math.max(minX, Math.min(maxX, x));
 }
 
+function pickSizeClass(rng, tutorial, band) {
+  const shortChance = tutorial ? 0.04 : (band.shortChance ?? 0.2);
+  const r = rng();
+  if (r < shortChance) return "short";
+  // Remaining split evenly between medium and wide (~40/40 overall when short is 20%).
+  if (r < shortChance + (1 - shortChance) * 0.5) return "medium";
+  return "wide";
+}
+
+function pickWidth(rng, cls) {
+  const { lo, hi } = SIZE[cls];
+  return randRange(rng, lo, hi);
+}
+
+function hasMargins(win) {
+  return win.ok && win.lo > CHARGE_MIN + 0.02 && win.hi < 0.98;
+}
+
+function usableEnough(win, winMin) {
+  return win.ok && win.width + 1e-6 >= Math.max(WINDOW_FLOOR, winMin - 0.04);
+}
+
 /**
- * Place one ledge so that, from `src` in `dir`, the landing power window
- * sits inside the band's target width and is away from 0.45 and 1.
+ * Place one ledge so that, from `src` in `dir`, a landing window of at least
+ * WINDOW_FLOOR exists, preferably in the band target, and usually missable
+ * with a short tap or a full charge. Width is drawn from a size class first
+ * so bars look mixed (wide breathers, medium, occasional shorts).
  */
 function placeFromSource(id, y, crumbleIn, src, dir, rng, tutorial, band) {
   const { min: winMin, max: winMax } = windowRange(tutorial, band);
   const dy = y - src.y;
   const heightFloor = minPowerForGap(dy);
-  const tries = 6;
+  const slab = { x: -30, y, w: VIEW_W + 60, h: LEDGE_H, phase: "solid" };
+  const tries = 10;
+  let fallback = null;
+
   for (let attempt = 0; attempt < tries; attempt++) {
-    const targetW = randRange(rng, winMin, winMax);
-    const half = targetW / 2;
-    const midLo = Math.max(heightFloor + half + 0.02, CHARGE_MIN + half + 0.05);
-    const midHi = 1 - half - 0.05;
+    const cls = pickSizeClass(rng, tutorial, band);
+    let w = pickWidth(rng, cls);
+    const typ = (winMin + winMax) / 2;
+    const midLo = Math.max(heightFloor + typ * 0.45, CHARGE_MIN + typ * 0.45 + 0.03);
+    const midHi = 1 - typ * 0.45 - 0.03;
     if (midLo > midHi) continue;
     const midPower = randRange(rng, midLo, midHi);
-    const atMid = canReachAtPower(src.x, src.y, dir, { x: -20, y, w: VIEW_W + 40, h: LEDGE_H, phase: "solid" }, midPower);
-    // use a dummy full-width slab just to get landing x at this height
+    const atMid = canReachAtPower(src.x, src.y, dir, slab, midPower);
     if (!atMid.ok || atMid.x == null) continue;
-    if (atMid.x < 40 || atMid.x > VIEW_W - 40) continue;
+    if (atMid.x < 22 || atMid.x > VIEW_W - 22) continue;
+    if (Math.abs(atMid.x - src.x) < 40) continue;
 
-    const atLo = canReachAtPower(src.x, src.y, dir, { x: -20, y, w: VIEW_W + 40, h: LEDGE_H, phase: "solid" }, midPower - half);
-    const atHi = canReachAtPower(src.x, src.y, dir, { x: -20, y, w: VIEW_W + 40, h: LEDGE_H, phase: "solid" }, midPower + half);
-    if (!atLo.ok || !atHi.ok) continue;
-    const span = Math.abs(atHi.x - atLo.x);
-    let w = Math.max(LEDGE_W_MIN, Math.min(LEDGE_W_MAX, span - LAND_FOOT_W));
-    let x = clampLedgeX(atMid.x - w / 2, w);
+    // Small random offset so the landing point is not always the exact center.
+    const offset = randRange(rng, -w * 0.18, w * 0.18);
+    let x = clampLedgeX(atMid.x - w / 2 + offset, w);
     let ledge = makeLedge(id, x, y, w, crumbleIn);
     let win = measureLandingWindow(src.x, src.y, dir, ledge);
-    for (let adj = 0; adj < 6 && win.ok; adj++) {
-      const tooNarrow = win.width < winMin - 1e-6;
-      const tooWide = win.width > winMax + 1e-6;
-      const touchesMin = win.lo <= CHARGE_MIN + 0.025;
-      const touchesMax = win.hi >= 1 - 0.025;
-      if (!tooNarrow && !tooWide && !touchesMin && !touchesMax) break;
-      if (tooNarrow || touchesMin || touchesMax) w = Math.min(LEDGE_W_MAX, w + 2);
-      if (tooWide) w = Math.max(LEDGE_W_MIN, w - 2);
-      const cx = win.x != null ? win.x : atMid.x;
-      x = clampLedgeX(cx - w / 2, w);
+
+    const classMin = SIZE[cls].lo;
+    for (let adj = 0; adj < 10 && win.ok; adj++) {
+      const tooNarrow = win.width < WINDOW_FLOOR;
+      const needMargin = !hasMargins(win);
+      if (!tooNarrow && !needMargin) break;
+      if (tooNarrow) w = Math.min(LEDGE_W_MAX, w + 6);
+      else if (needMargin && cls !== "wide") {
+        // Keep the size class; shrink only down to the class min (never crush wides).
+        const nextW = w - 4 >= classMin ? w - 4 : w;
+        if (nextW === w) break;
+        w = nextW;
+      } else {
+        break;
+      }
+      x = clampLedgeX((win.x ?? atMid.x) - w / 2, w);
       ledge = makeLedge(id, x, y, w, crumbleIn);
       win = measureLandingWindow(src.x, src.y, dir, ledge);
     }
+
     if (!win.ok) continue;
-    if (win.width < winMin - 0.015 || win.width > winMax + 0.015) continue;
-    if (win.lo <= CHARGE_MIN + 0.02 || win.hi >= 1 - 0.02) continue;
-    return { ledge, takeoffX: win.x ?? atMid.x, dir, win };
+    if (win.width + 1e-6 < WINDOW_FLOOR) continue;
+    const inBand = win.width >= winMin - 0.04 && win.width <= winMax + 0.06;
+    const okMargins = hasMargins(win);
+    if (win.ok && win.width >= WINDOW_FLOOR && (okMargins || cls === "wide")) {
+      return { ledge, takeoffX: win.x ?? atMid.x, dir, win };
+    }
+    if (win.ok && win.width >= WINDOW_FLOOR && okMargins) {
+      if (!fallback || Math.abs(win.width - typ) < Math.abs(fallback.win.width - typ)) {
+        fallback = { ledge, takeoffX: win.x ?? atMid.x, dir, win };
+      }
+    }
   }
-  // Last try: mid power 0.7, accept any window in the global 0.10–0.18 band.
-  const midPower = Math.max(minPowerForGap(dy) + 0.08, 0.7);
+
+  if (fallback) return fallback;
+
+  // Last try: mid power, any window at or above the floor with miss margins.
+  const midPower = Math.max(heightFloor + 0.08, 0.7);
   if (midPower < 0.95) {
-    const slab = { x: -20, y, w: VIEW_W + 40, h: LEDGE_H, phase: "solid" };
     const atMid = canReachAtPower(src.x, src.y, dir, slab, midPower);
     if (atMid.ok) {
-      const targetW = (winMin + winMax) / 2;
-      const loP = Math.max(CHARGE_MIN + 0.04, midPower - targetW / 2);
-      const hiP = Math.min(1 - 0.04, midPower + targetW / 2);
-      const atLo = canReachAtPower(src.x, src.y, dir, slab, loP);
-      const atHi = canReachAtPower(src.x, src.y, dir, slab, hiP);
-      if (atLo.ok && atHi.ok) {
-        const span = Math.abs(atHi.x - atLo.x);
-        let w = Math.max(LEDGE_W_MIN, Math.min(LEDGE_W_MAX, span - LAND_FOOT_W));
-        let x = clampLedgeX(atMid.x - w / 2, w);
-        let ledge = makeLedge(id, x, y, w, crumbleIn);
-        let win = measureLandingWindow(src.x, src.y, dir, ledge);
-        for (let adj = 0; adj < 8 && win.ok; adj++) {
-          if (win.width >= 0.10 && win.width <= 0.18 && win.lo > CHARGE_MIN + 0.02 && win.hi < 0.98) break;
-          if (win.width < 0.10) w = Math.min(LEDGE_W_MAX, w + 2);
-          if (win.width > 0.18) w = Math.max(LEDGE_W_MIN, w - 2);
-          x = clampLedgeX((win.x ?? atMid.x) - w / 2, w);
-          ledge = makeLedge(id, x, y, w, crumbleIn);
-          win = measureLandingWindow(src.x, src.y, dir, ledge);
-        }
-        if (win.ok && win.width >= 0.10 && win.width <= 0.18 && win.lo > CHARGE_MIN + 0.02 && win.hi < 0.98) {
-          return { ledge, takeoffX: win.x ?? atMid.x, dir, win };
-        }
+      let w = randRange(rng, 36, 80);
+      let x = clampLedgeX(atMid.x - w / 2, w);
+      let ledge = makeLedge(id, x, y, w, crumbleIn);
+      let win = measureLandingWindow(src.x, src.y, dir, ledge);
+      for (let adj = 0; adj < 10 && win.ok; adj++) {
+        if (win.width >= WINDOW_FLOOR && hasMargins(win)) break;
+        if (!win.ok || win.width < WINDOW_FLOOR) w = Math.min(LEDGE_W_MAX, w + 6);
+        else if (!hasMargins(win) && w > 32) w = Math.max(32, w - 4);
+        else break;
+        x = clampLedgeX((win.x ?? atMid.x) - w / 2, w);
+        ledge = makeLedge(id, x, y, w, crumbleIn);
+        win = measureLandingWindow(src.x, src.y, dir, ledge);
+      }
+      if (win.ok && win.width >= WINDOW_FLOOR && hasMargins(win)) {
+        return { ledge, takeoffX: win.x ?? atMid.x, dir, win };
       }
     }
   }
   return null;
 }
 
-
 function placeSharedCenter(id, y, crumbleIn, leftSrc, rightSrc, rng, tutorial, band) {
   const { min: winMin, max: winMax } = windowRange(tutorial, band);
-  const slab = { x: -20, y, w: VIEW_W + 40, h: LEDGE_H, phase: "solid" };
-  const targetX = VIEW_W / 2;
-  for (let attempt = 0; attempt < 14; attempt++) {
+  const slab = { x: -30, y, w: VIEW_W + 60, h: LEDGE_H, phase: "solid" };
+  // Random shared target, not a fixed column.
+  const targetX = randRange(rng, 110, VIEW_W - 110);
+  for (let attempt = 0; attempt < 12; attempt++) {
     const pickPower = (src, dir) => {
       let best = null;
       const lo = Math.max(CHARGE_MIN + 0.08, minPowerForGap(y - src.y) + 0.06);
@@ -168,29 +210,32 @@ function placeSharedCenter(id, y, crumbleIn, leftSrc, rightSrc, rng, tutorial, b
     const fromR = pickPower(rightSrc, -1);
     if (!fromL || !fromR) continue;
     const cx = (fromL.x + fromR.x) / 2;
-    const targetW = randRange(rng, winMin, winMax);
-    const half = targetW / 2;
-    const edgeL = canReachAtPower(leftSrc.x, leftSrc.y, 1, slab, fromL.power - half);
-    const edgeH = canReachAtPower(leftSrc.x, leftSrc.y, 1, slab, fromL.power + half);
-    if (!edgeL.ok || !edgeH.ok) continue;
-    let w = Math.max(LEDGE_W_MIN, Math.min(LEDGE_W_MAX, Math.abs(edgeH.x - edgeL.x) - LAND_FOOT_W));
+    const cls = pickSizeClass(rng, tutorial, band);
+    let w = pickWidth(rng, cls);
+    const classMin = SIZE[cls].lo;
     let x = clampLedgeX(cx - w / 2, w);
     let ledge = makeLedge(id, x, y, w, crumbleIn);
     let winL = measureLandingWindow(leftSrc.x, leftSrc.y, 1, ledge);
     let winR = measureLandingWindow(rightSrc.x, rightSrc.y, -1, ledge);
     for (let adj = 0; adj < 8; adj++) {
-      const okL = winL.ok && winL.width >= winMin - 0.015 && winL.width <= winMax + 0.015 && winL.lo > CHARGE_MIN + 0.02 && winL.hi < 0.98;
-      const okR = winR.ok && winR.width >= winMin - 0.015 && winR.width <= winMax + 0.015 && winR.lo > CHARGE_MIN + 0.02 && winR.hi < 0.98;
+      const okL = winL.ok && winL.width >= WINDOW_FLOOR && hasMargins(winL);
+      const okR = winR.ok && winR.width >= WINDOW_FLOOR && hasMargins(winR);
       if (okL && okR) {
         return [
-          { ledge, takeoffX: ledge.x + ledge.w / 2, dir: 1, win: winL },
+          { ledge, takeoffX: winL.x ?? fromL.x, dir: 1, win: winL },
+          { ledge, takeoffX: winR.x ?? fromR.x, dir: -1, win: winR },
         ];
       }
-      const tooNarrow = (winL.ok && winL.width < winMin) || (winR.ok && winR.width < winMin) || !winL.ok || !winR.ok;
-      const tooWide = (winL.ok && winL.width > winMax) || (winR.ok && winR.width > winMax);
-      if (tooNarrow) w = Math.min(LEDGE_W_MAX, w + 2);
-      else if (tooWide) w = Math.max(LEDGE_W_MIN, w - 2);
-      else w = Math.min(LEDGE_W_MAX, w + 2);
+      const tooNarrow = !winL.ok || !winR.ok || winL.width < WINDOW_FLOOR || winR.width < WINDOW_FLOOR;
+      const needMargin = (winL.ok && !hasMargins(winL)) || (winR.ok && !hasMargins(winR));
+      if (tooNarrow) w = Math.min(LEDGE_W_MAX, w + 6);
+      else if (needMargin && cls !== "wide" && w - 4 >= classMin) w = w - 4;
+      else if (winL.ok && winR.ok && winL.width >= WINDOW_FLOOR && winR.width >= WINDOW_FLOOR && cls === "wide") {
+        return [
+          { ledge, takeoffX: winL.x ?? fromL.x, dir: 1, win: winL },
+          { ledge, takeoffX: winR.x ?? fromR.x, dir: -1, win: winR },
+        ];
+      } else break;
       x = clampLedgeX(cx - w / 2, w);
       ledge = makeLedge(id, x, y, w, crumbleIn);
       winL = measureLandingWindow(leftSrc.x, leftSrc.y, 1, ledge);
@@ -200,40 +245,89 @@ function placeSharedCenter(id, y, crumbleIn, leftSrc, rightSrc, rng, tutorial, b
   return null;
 }
 
+
+function sampleTakeoffs(ledge, takeoffX) {
+  if (!ledge) return [takeoffX];
+  if (ledge.id === "start") return [180];
+  const mid = clampOntoLedge(takeoffX ?? (ledge.x + ledge.w / 2), ledge);
+  if (ledge.w < 48) return [mid];
+  const lo = clampOntoLedge(ledge.x, ledge);
+  const hi = clampOntoLedge(ledge.x + ledge.w, ledge);
+  return [...new Set([mid, lo, hi].map((x) => Math.round(x * 10) / 10))];
+}
+
+function bestWindowFrom(x, y, ledge) {
+  const right = measureLandingWindow(x, y, 1, ledge);
+  const left = measureLandingWindow(x, y, -1, ledge);
+  if (right.ok && left.ok) return right.width >= left.width ? right : left;
+  return right.ok ? right : left;
+}
+
+function coversSamples(xs, y, ledge) {
+  return xs.every((x) => {
+    const win = bestWindowFrom(x, y, ledge);
+    return win.ok && win.width + 1e-6 >= WINDOW_FLOOR;
+  });
+}
+
+/** Widen a just-placed ledge so nearby takeoff xs on the source still land. */
+function widenToCover(placed, src, samples) {
+  if (!placed || !samples || samples.length <= 1) return placed;
+  const y = src.y;
+  let ledge = placed.ledge;
+  let w = ledge.w;
+  let x = ledge.x;
+  const cx = placed.takeoffX ?? ledge.x + ledge.w / 2;
+  for (let i = 0; i < 8 && !coversSamples(samples, y, ledge); i++) {
+    w = Math.min(LEDGE_W_MAX, w + 8);
+    x = clampLedgeX(cx - w / 2, w);
+    ledge = makeLedge(ledge.id, x, ledge.y, w, ledge.crumbleIn);
+  }
+  if (!coversSamples(samples, y, ledge)) return placed;
+  const win = placed.win && placed.win.dir != null
+    ? measureLandingWindow(src.x, src.y, placed.dir, ledge)
+    : bestWindowFrom(src.x, y, ledge);
+  return {
+    ...placed,
+    ledge,
+    takeoffX: win.ok ? (win.x ?? placed.takeoffX) : placed.takeoffX,
+    win: win.ok ? win : placed.win,
+  };
+}
+
 function hasUsableWindow(src, ledge, tutorial, band) {
-  const { min: winMin, max: winMax } = windowRange(tutorial, band);
+  // A real landing (>= floor) is enough to skip adding a second catch-ledge,
+  // even if the window touches min/max power.
   for (const dir of [-1, 1]) {
     const win = measureLandingWindow(src.x, src.y, dir, ledge);
-    if (
-      win.ok &&
-      win.width >= winMin - 0.015 &&
-      win.width <= winMax + 0.015 &&
-      win.lo > CHARGE_MIN + 0.02 &&
-      win.hi < 0.98
-    ) {
-      return win;
-    }
+    if (win.ok && win.width + 1e-6 >= WINDOW_FLOOR) return win;
   }
   return null;
 }
 
 function desiredDirs(rowIndex, sources, rng, band) {
-  // Zigzag: far-apart edge sources jump inward; clustered mid sources fan out.
-  // Every source gets a plan so no platform is a dead end.
+  // Varied headings: far-apart edge sources often jump inward; otherwise
+  // pick a random reachable direction per source so x is not column-locked.
   const s = [...sources].sort((a, b) => a.x - b.x);
   const tutorialLike = rowIndex <= FIRST_ROWS;
   if (s.length >= 2) {
     const lo = s[0];
     const hi = s[s.length - 1];
-    if (lo.x < 110 && hi.x > 250) {
+    if (lo.x < 110 && hi.x > 250 && rng() < 0.7) {
       return [
         { src: lo, dir: 1 },
         { src: hi, dir: -1 },
       ];
     }
+    if (rng() < 0.5) {
+      return [
+        { src: lo, dir: -1 },
+        { src: hi, dir: 1 },
+      ];
+    }
     return [
-      { src: lo, dir: -1 },
-      { src: hi, dir: 1 },
+      { src: lo, dir: rng() < 0.45 ? -1 : 1 },
+      { src: hi, dir: rng() < 0.55 ? 1 : -1 },
     ];
   }
   const src = s[0];
@@ -247,17 +341,23 @@ function desiredDirs(rowIndex, sources, rng, band) {
 }
 
 function nextSources(placed, y) {
-  // Take off from the center of each placed ledge (play snaps there on land).
-  const xs = placed
-    .map((p) => p.ledge.x + p.ledge.w / 2)
-    .filter((x) => Number.isFinite(x))
-    .sort((a, b) => a - b);
-  if (!xs.length) return [];
-  if (xs.length === 1 || xs[xs.length - 1] - xs[0] < 24) return [{ x: xs[0], y }];
-  return [
-    { x: xs[0], y },
-    { x: xs[xs.length - 1], y },
-  ];
+  // Designed landing x plus side samples on wide bars (play keeps actual x).
+  const pts = [];
+  for (const p of placed) {
+    const L = p.ledge;
+    const take = p.takeoffX ?? p.win?.x ?? L.x + L.w * 0.5;
+    for (const x of sampleTakeoffs(L, take)) {
+      pts.push({ x, y, ledge: L });
+    }
+  }
+  pts.sort((a, b) => a.x - b.x);
+  const uniq = [];
+  for (const p of pts) {
+    if (!uniq.some((u) => Math.abs(u.x - p.x) < 16)) uniq.push(p);
+  }
+  if (!uniq.length) return [];
+  if (uniq.length <= 2) return uniq;
+  return [uniq[0], uniq[uniq.length - 1]];
 }
 
 /**
@@ -267,8 +367,10 @@ function nextSources(placed, y) {
 export function generateLedges(seed, yFrom, yTo) {
   if (yTo < yFrom) return [];
   const rng = createRng(seed);
-  const all = [startFloor()];
-  let sources = [{ x: 180, y: 0 }];
+  const start = startFloor();
+  const all = [start];
+  let sources = [{ x: 180, y: 0, ledge: start }];
+  let prevPlaced = [{ ledge: start, takeoffX: 180 }];
   let prevY = 0;
   let row = 0;
 
@@ -276,8 +378,8 @@ export function generateLedges(seed, yFrom, yTo) {
     row += 1;
     const tutorial = row <= FIRST_ROWS;
     const band = bandAtY(prevY + (tutorial ? 58 : 72));
-    const gapMin = tutorial ? 48 : band.gapMin;
-    const gapMax = tutorial ? 66 : band.gapMax;
+    const gapMin = tutorial ? 44 : band.gapMin;
+    const gapMax = tutorial ? 80 : band.gapMax;
     const y = prevY + randRange(rng, gapMin, gapMax);
     const crumbleIn = tutorial ? FIRST_CRUMBLE : bandAtY(y).crumbleIn;
     const plans = desiredDirs(row, sources, rng, bandAtY(y));
@@ -296,26 +398,52 @@ export function generateLedges(seed, yFrom, yTo) {
       const already = placed.some((p) => p.dir === plan.dir && hasUsableWindow(plan.src, p.ledge, tutorial, bandAtY(y)));
       if (already) continue;
       seq += 1;
-      const got = placeFromSource(`L${row}-${seq}`, y, crumbleIn, plan.src, plan.dir, rng, tutorial, bandAtY(y));
-      if (got) placed.push(got);
-    }
-
-    // If a source got no ledge, try the opposite dir once. Never a 3rd platform.
-    if (placed.length < 2) {
-      for (const src of sources) {
-        if (placed.length >= 2) break;
-        const ok = placed.some((p) => hasUsableWindow(src, p.ledge, tutorial, bandAtY(y)));
-        if (ok) continue;
-        const prefer = src.x < VIEW_W / 2 ? 1 : -1;
-        seq += 1;
-        const got = placeFromSource(`L${row}-${seq}`, y, crumbleIn, src, prefer, rng, tutorial, bandAtY(y))
-          || placeFromSource(`L${row}-${seq}`, y, crumbleIn, src, -prefer, rng, tutorial, bandAtY(y));
-        if (got) placed.push(got);
+      let got = placeFromSource(`L${row}-${seq}`, y, crumbleIn, plan.src, plan.dir, rng, tutorial, bandAtY(y));
+      if (got) {
+        const samples = sampleTakeoffs(plan.src.ledge, plan.src.x);
+        got = widenToCover(got, plan.src, samples);
+        placed.push(got);
       }
     }
 
-    for (const p of placed) all.push(p.ledge);
+    // Cover every takeoff sample on the previous row (not just the 2 sources).
+    const prevSources = [];
+    for (const p of prevPlaced) {
+      const L = p.ledge;
+      const take = p.takeoffX ?? L.x + L.w / 2;
+      for (const x of sampleTakeoffs(L, take)) {
+        prevSources.push({ x, y: L.y, ledge: L });
+      }
+    }
+    for (const src of prevSources) {
+      const samples = sampleTakeoffs(src.ledge, src.x);
+      const uncovered = samples.filter((x) => !placed.some((p) => hasUsableWindow({ x, y: src.y }, p.ledge)));
+      if (!uncovered.length) continue;
+      let covered = false;
+      for (let i = 0; i < placed.length; i++) {
+        const wide = widenToCover(placed[i], { x: uncovered[0], y: src.y }, uncovered);
+        if (coversSamples(uncovered, src.y, wide.ledge)) {
+          placed[i] = wide;
+          covered = true;
+          break;
+        }
+      }
+      if (covered || placed.length >= 2) continue;
+      const prefer = src.x < VIEW_W / 2 ? 1 : -1;
+      seq += 1;
+      let got = placeFromSource(`L${row}-${seq}`, y, crumbleIn, src, prefer, rng, tutorial, bandAtY(y))
+        || placeFromSource(`L${row}-${seq}`, y, crumbleIn, src, -prefer, rng, tutorial, bandAtY(y));
+      if (got) {
+        got = widenToCover(got, src, samples);
+        placed.push(got);
+      }
+    }
+
+    for (const p of placed) {
+      if (!all.some((l) => l.id === p.ledge.id)) all.push(p.ledge);
+    }
     if (!placed.length) break;
+    prevPlaced = placed;
     sources = nextSources(placed, y);
     prevY = y;
   }

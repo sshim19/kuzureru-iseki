@@ -56,7 +56,13 @@
           <p class="rule" id="over-rule">左か右を押してためて、はなすとその向きに跳べます。長く押すほど、高く遠くまで跳べます。</p>
           <div class="actions">
             <button type="button" class="action" id="btn-retry">もう一度</button>
-            <button type="button" class="action action-secondary" id="btn-copy">結果をコピー</button>
+            <button type="button" class="action action-secondary" id="btn-share">結果を共有</button>
+            <button type="button" class="action action-secondary" id="btn-copy" hidden>結果をコピー</button>
+            <div class="share-row" role="group" aria-label="共有先">
+              <button type="button" class="share-btn" id="btn-share-x">X</button>
+              <button type="button" class="share-btn" id="btn-share-line">LINE</button>
+              <button type="button" class="share-btn" id="btn-share-ig">インスタ</button>
+            </div>
           </div>
           <p class="copy-status" id="copy-status" hidden aria-live="polite"></p>
         </section>
